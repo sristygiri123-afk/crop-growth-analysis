@@ -495,44 +495,81 @@ def api_serial_log():
     return jsonify({"count": len(serial_log), "lines": list(serial_log)})
 
 
+#@app.route("/api/disease/detect", methods=["POST"])
+#def api_disease_detect():
+@app.route("/api/camera/capture", methods=["POST"])
+def api_camera_capture():
+    """Takes ONE still photo from the ESP32-CAM and returns it as base64 --
+    does NOT run disease detection. Lets the frontend freeze a stable
+    image before analyzing it."""
+    with state_lock:
+        cam_ip = camera_state["ip"]
+
+    if not cam_ip:
+        return jsonify({"ok": False, "error": "No camera IP configured yet."}), 400
+
+    capture_url = f"http://{cam_ip}/capture"
+    try:
+        resp = requests.get(capture_url, timeout=10)
+        resp.raise_for_status()
+        image_bytes = resp.content
+    except requests.RequestException as e:
+        return jsonify({"ok": False, "error": f"Could not capture image from ESP32-CAM: {e}"}), 502
+
+    image_b64 = "data:image/jpeg;base64," + base64.b64encode(image_bytes).decode("ascii")
+    return jsonify({"ok": True, "image": image_b64, "timestamp": now_iso()})
+
+
 @app.route("/api/disease/detect", methods=["POST"])
 def api_disease_detect():
     print("\n========== DISEASE DETECTION START ==========")
 
-    with state_lock:
-        cam_ip = camera_state["ip"]
+    body = request.get_json(silent=True) or {}
+    supplied_image = body.get("image")
 
-    print("Camera IP:", cam_ip)
+    if supplied_image:
+        print("Using already-captured image from frontend (no new camera fetch).")
+        try:
+            header, _, b64data = supplied_image.partition(",")
+            image_bytes = base64.b64decode(b64data if b64data else supplied_image)
+        except Exception as e:
+            print("INVALID IMAGE DATA:", repr(e))
+            return jsonify({"ok": False, "error": f"Invalid image data: {e}"}), 400
+    else:
+        with state_lock:
+            cam_ip = camera_state["ip"]
 
-    if not cam_ip:
-        print("ERROR: No camera IP configured")
-        return jsonify({
-            "ok": False,
-            "error": "No camera IP configured yet."
-        }), 400
+        print("Camera IP:", cam_ip)
 
-    capture_url = f"http://{cam_ip}/capture"
-    print("Capture URL:", capture_url)
+        if not cam_ip:
+            print("ERROR: No camera IP configured")
+            return jsonify({
+                "ok": False,
+                "error": "No camera IP configured yet."
+            }), 400
 
-    try:
-        print("Requesting image from ESP32-CAM...")
-        resp = requests.get(capture_url, timeout=10)
+        capture_url = f"http://{cam_ip}/capture"
+        print("Capture URL:", capture_url)
 
-        print("Camera HTTP status:", resp.status_code)
-        print("Content-Type:", resp.headers.get("Content-Type"))
-        print("Image bytes received:", len(resp.content))
+        try:
+            print("Requesting image from ESP32-CAM...")
+            resp = requests.get(capture_url, timeout=10)
 
-        resp.raise_for_status()
+            print("Camera HTTP status:", resp.status_code)
+            print("Content-Type:", resp.headers.get("Content-Type"))
+            print("Image bytes received:", len(resp.content))
 
-        image_bytes = resp.content
+            resp.raise_for_status()
 
-    except requests.RequestException as e:
-        print("CAMERA CAPTURE ERROR:", repr(e))
+            image_bytes = resp.content
 
-        return jsonify({
-            "ok": False,
-            "error": f"Could not capture image from ESP32-CAM: {e}"
-        }), 502
+        except requests.RequestException as e:
+            print("CAMERA CAPTURE ERROR:", repr(e))
+
+            return jsonify({
+                "ok": False,
+                "error": f"Could not capture image from ESP32-CAM: {e}"
+            }), 502
 
     try:
         print("Starting disease model...")

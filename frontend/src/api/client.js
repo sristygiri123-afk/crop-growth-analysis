@@ -78,7 +78,14 @@ export const api = {
     request("/api/irrigation/mode", { method: "POST", body: JSON.stringify({ mode }) }),
   getEvents: (kind) => request(`/api/events${kind ? `?kind=${kind}` : ""}`),
   getSerialLog: () => request("/api/serial-log"),
-  detectDisease: () => request("/api/disease/detect", { method: "POST", timeoutMs: 120000 }),
+  //detectDisease: () => request("/api/disease/detect", { method: "POST", timeoutMs: 120000 }),
+  captureSnapshot: () => request("/api/camera/capture", { method: "POST", timeoutMs: 15000 }),
+  detectDisease: (image) =>
+      request("/api/disease/detect", {
+          method: "POST",
+          timeoutMs: 120000,
+          body: JSON.stringify(image ? { image } : {}),
+    }),
   getDiseaseHistory: () => request("/api/disease/history"),
   getCropMeta: () => request("/api/crops/meta", { timeoutMs: 8000 }),
   recommendCrop: (payload) =>

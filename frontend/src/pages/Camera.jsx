@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Play, Square, RefreshCw, Maximize, Camera as CameraIcon, CheckCircle2, XCircle, Sparkles, Leaf, AlertOctagon } from "lucide-react";
+import { Play, Square, RefreshCw, Maximize, Camera as CameraIcon, CheckCircle2, XCircle, Sparkles, Leaf, AlertOctagon, Aperture, RotateCcw } from "lucide-react";
 import { api } from "../api/client.js";
 import { usePolling } from "../api/usePolling.js";
 
@@ -63,15 +63,42 @@ export default function Camera() {
 
   const reachable = camStatus.data?.reachable;
 
+  const [capturedImage, setCapturedImage] = useState(null);
+  const [capturing, setCapturing] = useState(false);
+  const [captureError, setCaptureError] = useState(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [diseaseResult, setDiseaseResult] = useState(null);
   const [diseaseError, setDiseaseError] = useState(null);
 
+  const captureImage = async () => {
+    setCapturing(true);
+    setCaptureError(null);
+    setDiseaseResult(null);
+    setDiseaseError(null);
+    try {
+      const res = await api.captureSnapshot();
+      setCapturedImage(res.image);
+    } catch (e) {
+      setCaptureError(e.message);
+      setCapturedImage(null);
+    } finally {
+      setCapturing(false);
+    }
+  };
+
+  const retake = () => {
+    setCapturedImage(null);
+    setDiseaseResult(null);
+    setDiseaseError(null);
+    setCaptureError(null);
+  };
+
   const runDiseaseDetection = async () => {
+    if (!capturedImage) return;
     setAnalyzing(true);
     setDiseaseError(null);
     try {
-      const res = await api.detectDisease();
+      const res = await api.detectDisease(capturedImage);
       setDiseaseResult(res);
     } catch (e) {
       setDiseaseError(e.message);
@@ -95,7 +122,13 @@ export default function Camera() {
             className="relative bg-forest-900 rounded-xl overflow-hidden flex items-center justify-center"
             style={{ aspectRatio: "16/9" }}
           >
-            {!camStatus.data?.ip ? (
+            {capturedImage ? (
+              <img
+                src={capturedImage}
+                alt="Captured still snapshot"
+                className="w-full h-full object-contain"
+              />
+            ) : !camStatus.data?.ip ? (
               <EmptyState text="No camera IP configured yet. Enter one on the right." />
             ) : !streaming ? (
               <EmptyState text="Stream stopped. Press Start Stream to connect." />
@@ -113,26 +146,52 @@ export default function Camera() {
                 onError={() => setImgError(true)}
               />
             )}
+
+            {capturedImage && (
+              <span className="absolute top-3 left-3 badge bg-forest-900/80 text-beige-100 backdrop-blur">
+                Frozen snapshot — not live
+              </span>
+            )}
           </div>
 
           <div className="flex flex-wrap gap-2 mt-4">
-            <ActionButton icon={Play} label="Start Stream" onClick={startStream} disabled={!camStatus.data?.ip} primary />
-            <ActionButton icon={Square} label="Stop Stream" onClick={stopStream} disabled={!streaming} />
-            <ActionButton icon={RefreshCw} label="Refresh" onClick={refreshStream} disabled={!streaming} />
-            <ActionButton icon={Maximize} label="Fullscreen" onClick={goFullscreen} disabled={!streaming || imgError} />
-            <ActionButton
-              icon={Sparkles}
-              label={analyzing ? "Analyzing…" : "Capture & Analyze (AI)"}
-              onClick={runDiseaseDetection}
-              disabled={analyzing || !camStatus.data?.ip}
-              primary
-            />
+                        {!capturedImage ? (
+              <>
+                <ActionButton icon={Play} label="Start Stream" onClick={startStream} disabled={!camStatus.data?.ip} />
+                <ActionButton icon={Square} label="Stop Stream" onClick={stopStream} disabled={!streaming} />
+                <ActionButton icon={RefreshCw} label="Refresh" onClick={refreshStream} disabled={!streaming} />
+                <ActionButton icon={Maximize} label="Fullscreen" onClick={goFullscreen} disabled={!streaming || imgError} />
+                <ActionButton
+                  icon={Aperture}
+                  label={capturing ? "Capturing…" : "Capture Image"}
+                  onClick={captureImage}
+                  disabled={capturing || !camStatus.data?.ip}
+                  primary
+                />
+              </>
+            ) : (
+              <>
+                <ActionButton icon={RotateCcw} label="Retake" onClick={retake} disabled={analyzing} />
+                <ActionButton
+                  icon={Sparkles}
+                  label={analyzing ? "Analyzing…" : "Analyze Captured Image (AI)"}
+                  onClick={runDiseaseDetection}
+                  disabled={analyzing}
+                  primary
+                />
+              </>
+            )}
           </div>
 
           <p className="text-xs text-forest-400 mt-2">
-            Analysis takes a fresh still snapshot from the camera's <code className="bg-forest-100 px-1 rounded">/capture</code> endpoint
-            (independent of the live stream above) and runs it through a pretrained PlantVillage CNN on the backend.
+            {!capturedImage
+              ? "Capture takes one still photo from the camera's /capture endpoint and freezes it here — hold the camera steady for a second."
+              : "Review the frozen image above. If it's sharp, analyze it. If blurry, hit Retake."}
           </p>
+
+          {captureError && (
+            <div className="mt-3 bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2">{captureError}</div>
+          )}
 
           {diseaseError && (
             <div className="mt-3 bg-red-50 text-red-600 text-sm rounded-lg px-3 py-2">{diseaseError}</div>
